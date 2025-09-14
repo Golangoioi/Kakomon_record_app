@@ -49,9 +49,14 @@ else:
 
     st.title(f"{name} の成績管理アプリ")
 
+    # --- ログアウト関数 ---
+    def logout():
+        st.session_state.clear()
+        st.experimental_rerun()
+
     # --- サイドバーでタブ切り替え ---
     page = st.sidebar.selectbox("ページ選択", ["得点入力","志望校登録/更新","志望校換算"])
-    st.sidebar.button("ログアウト", on_click=lambda: [st.session_state.clear(), st.experimental_rerun()])
+    st.sidebar.button("ログアウト", on_click=logout)
 
     # --- ページごとの処理 ---
     if page == "得点入力":
