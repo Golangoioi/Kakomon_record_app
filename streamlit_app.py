@@ -14,32 +14,47 @@ for file, cols in [(USERS_CSV, ["Email","Name"]),
     if not os.path.exists(file):
         pd.DataFrame(columns=cols).to_csv(file, index=False)
 
-st.title("成績管理アプリ（CSVベースMVP）")
+# --- セッション初期化 ---
+if "user_email" not in st.session_state:
+    st.session_state.user_email = None
+    st.session_state.user_name = None
 
-# --- ログイン ---
-email = st.text_input("メールアドレス")
-name = ""
-users_df = pd.read_csv(USERS_CSV)
+# --- ログイン画面 ---
+if st.session_state.user_email is None:
+    st.title("ログイン")
+    email = st.text_input("メールアドレス")
+    name = ""
+    users_df = pd.read_csv(USERS_CSV)
 
-if email:
-    if email in users_df["Email"].values:
-        name = users_df.loc[users_df["Email"]==email, "Name"].values[0]
-        st.success(f"ログイン成功: {name}")
-    else:
-        name = st.text_input("名前を入力して新規登録")
-        if st.button("新規登録"):
-            if name:
-                users_df = pd.concat([users_df, pd.DataFrame([[email,name]], columns=["Email","Name"])])
-                users_df.to_csv(USERS_CSV, index=False)
-                st.success(f"新規登録完了: {name}")
-            else:
-                st.warning("名前を入力してください")
+    if email:
+        if email in users_df["Email"].values:
+            st.session_state.user_email = email
+            st.session_state.user_name = users_df.loc[users_df["Email"]==email, "Name"].values[0]
+            st.experimental_rerun()
+        else:
+            name = st.text_input("名前を入力して新規登録")
+            if st.button("新規登録"):
+                if name:
+                    users_df = pd.concat([users_df, pd.DataFrame([[email,name]], columns=["Email","Name"])])
+                    users_df.to_csv(USERS_CSV, index=False)
+                    st.session_state.user_email = email
+                    st.session_state.user_name = name
+                    st.experimental_rerun()
+                else:
+                    st.warning("名前を入力してください")
+else:
+    # --- アプリ本体 ---
+    email = st.session_state.user_email
+    name = st.session_state.user_name
 
-if name:
-    tabs = st.tabs(["得点入力","志望校登録/更新","志望校換算"])
+    st.title(f"{name} の成績管理アプリ")
 
-    # --- タブ1: 得点入力 ---
-    with tabs[0]:
+    # --- サイドバーでタブ切り替え ---
+    page = st.sidebar.selectbox("ページ選択", ["得点入力","志望校登録/更新","志望校換算"])
+    st.sidebar.button("ログアウト", on_click=lambda: [st.session_state.clear(), st.experimental_rerun()])
+
+    # --- ページごとの処理 ---
+    if page == "得点入力":
         st.subheader("得点入力（共通テスト含む）")
         subjects = ["英語","数学","物理"]
         score_inputs = {}
@@ -54,8 +69,7 @@ if name:
             scores_df.to_csv(SCORES_CSV, index=False)
             st.success("得点を保存しました")
 
-    # --- タブ2: 志望校登録/更新 ---
-    with tabs[1]:
+    elif page == "志望校登録/更新":
         st.subheader("志望校登録 / 更新")
         new_school = st.text_input("学校名（共通テストもここでOK）", key="school_name")
         new_subjects = st.text_input("科目（カンマ区切り）", key="school_subjects")
@@ -71,8 +85,7 @@ if name:
             else:
                 st.warning("すべて入力してください")
 
-    # --- タブ3: 志望校換算 ---
-    with tabs[2]:
+    elif page == "志望校換算":
         st.subheader("志望校換算")
         schools_df = pd.read_csv(SCHOOLS_CSV)
         user_schools = schools_df[schools_df["Email"]==email]
