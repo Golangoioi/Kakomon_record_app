@@ -2,12 +2,12 @@ import streamlit as st
 import pandas as pd
 import os
 
-# ファイル名
+# --- CSVファイル ---
 USERS_CSV = "users.csv"
 SCORES_CSV = "scores.csv"
 SCHOOLS_CSV = "schools.csv"
 
-# CSVがなければ作る
+# --- CSV初期化 ---
 for file, cols in [(USERS_CSV, ["Email","Name"]),
                    (SCORES_CSV, ["Email","Subject","Score"]),
                    (SCHOOLS_CSV, ["Email","SchoolName","Subjects","MaxScores"])]:
@@ -16,7 +16,7 @@ for file, cols in [(USERS_CSV, ["Email","Name"]),
 
 st.title("成績管理アプリ（CSVベースMVP）")
 
-# --- ログイン/新規登録 ---
+# --- ログイン / 新規登録 ---
 st.subheader("ログイン / 新規登録")
 email = st.text_input("メールアドレス")
 name = ""
@@ -27,7 +27,7 @@ if email:
         name = users_df.loc[users_df["Email"]==email, "Name"].values[0]
         st.success(f"ログイン成功: {name}")
     else:
-        name = st.text_input("名前を入力して登録")
+        name = st.text_input("名前を入力して新規登録")
         if st.button("新規登録"):
             if name:
                 users_df = pd.concat([users_df, pd.DataFrame([[email,name]], columns=["Email","Name"])])
@@ -46,9 +46,9 @@ if name:
 
     if st.button("保存"):
         scores_df = pd.read_csv(SCORES_CSV)
+        # 既存のユーザー分を削除して新規追加
+        scores_df = scores_df[scores_df["Email"] != email]
         for sub, val in score_inputs.items():
-            # 既存データは上書き
-            scores_df = scores_df[scores_df["Email"] != email]
             scores_df = pd.concat([scores_df, pd.DataFrame([[email,sub,val]], columns=["Email","Subject","Score"])])
         scores_df.to_csv(SCORES_CSV, index=False)
         st.success("共通テスト得点を保存しました")
@@ -72,3 +72,21 @@ if name:
                 converted = score / 100 * max_score  # 共通テスト最大点100と仮定
                 converted_scores.append(converted)
             st.write(f"**{row['SchoolName']}**: {converted_scores}")
+
+# --- 志望校登録セクション（任意追加） ---
+if name:
+    st.subheader("志望校登録 / 更新")
+    new_school = st.text_input("学校名")
+    new_subjects = st.text_input("科目（カンマ区切り）")
+    new_max_scores = st.text_input("各科目の最大点（カンマ区切り）")
+    if st.button("登録/更新"):
+        if new_school and new_subjects and new_max_scores:
+            schools_df = pd.read_csv(SCHOOLS_CSV)
+            # 既存の同じ学校情報を削除
+            schools_df = schools_df[~((schools_df["Email"]==email) & (schools_df["SchoolName"]==new_school))]
+            schools_df = pd.concat([schools_df, pd.DataFrame([[email,new_school,new_subjects,new_max_scores]],
+                                                            columns=["Email","SchoolName","Subjects","MaxScores"])])
+            schools_df.to_csv(SCHOOLS_CSV, index=False)
+            st.success(f"{new_school} を登録/更新しました")
+        else:
+            st.warning("すべて入力してください")
