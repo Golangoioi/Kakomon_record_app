@@ -8,8 +8,8 @@ import numpy as np
 
 # ページ設定
 st.set_page_config(
-    page_title="成績管理アプリ",
-    page_icon="📚",
+    page_title="過去問成績管理appカコレコ",
+    page_icon="📝",
     layout="wide",
     initial_sidebar_state="expanded"
 )
