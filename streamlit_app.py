@@ -18,9 +18,19 @@ for file, cols in [(USERS_CSV, ["Email","Name"]),
 if "user_email" not in st.session_state:
     st.session_state.user_email = None
     st.session_state.user_name = None
+if "logout_flag" not in st.session_state:
+    st.session_state.logout_flag = False
+
+# --- ログアウト関数 ---
+def logout():
+    st.session_state.logout_flag = True
 
 # --- ログイン画面 ---
-if st.session_state.user_email is None:
+if st.session_state.user_email is None or st.session_state.logout_flag:
+    st.session_state.logout_flag = False
+    st.session_state.user_email = None
+    st.session_state.user_name = None
+
     st.title("ログイン")
     email = st.text_input("メールアドレス")
     name = ""
@@ -48,11 +58,6 @@ else:
     name = st.session_state.user_name
 
     st.title(f"{name} の成績管理アプリ")
-
-    # --- ログアウト関数 ---
-    def logout():
-        st.session_state.clear()
-        st.experimental_rerun()
 
     # --- サイドバーでタブ切り替え ---
     page = st.sidebar.selectbox("ページ選択", ["得点入力","志望校登録/更新","志望校換算"])
