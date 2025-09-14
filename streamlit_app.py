@@ -3,6 +3,10 @@ import pandas as pd
 import os
 from typing import Optional, Dict, List
 import re
+import plotly.graph_objects as go
+import plotly.express as px
+from datetime import datetime
+import numpy as np
 
 # ページ設定
 st.set_page_config(
@@ -36,13 +40,28 @@ st.markdown("""
             padding-right: 0.5rem;
         }
     }
+    .metric-card {
+        background-color: #f0f2f6;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin: 0.5rem 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # データファイルのパス
 USERS_FILE = "users.csv"
-SCORES_FILE = "scores.csv"
 SCHOOLS_FILE = "schools.csv"
+SCORES_FILE = "test_scores.csv"  # 新しい構造：テスト結果を記録
+
+# 科目一覧
+ALL_SUBJECTS = [
+    "英語", "数学I・A", "数学II・B", "数学III", "国語", 
+    "現代文", "古文", "漢文", "物理", "化学", "生物", 
+    "地学", "日本史", "世界史", "地理", "公民", "倫理", 
+    "政治経済", "現代社会", "英語リーディング", "英語リスニング",
+    "情報", "小論文", "面接"
+]
 
 def safe_read_csv(filepath: str, columns: List[str]) -> pd.DataFrame:
     """CSVファイルを安全に読み込む関数。ファイルが存在しない場合は空のDataFrameを作成"""
@@ -153,88 +172,8 @@ def login_page():
             else:
                 st.error("登録に失敗しました")
 
-def score_input_page():
-    """得点入力ページ"""
-    st.title("📝 得点入力")
-    
-    # 基本科目リスト
-    default_subjects = ["英語", "数学", "国語", "物理", "化学", "生物", "日本史", "世界史", "地理", "公民"]
-    
-    # 現在の得点データを取得
-    scores_df = safe_read_csv(SCORES_FILE, ["Email", "Subject", "Score"])
-    user_scores = scores_df[scores_df["Email"] == st.session_state.user_email] if not scores_df.empty else pd.DataFrame()
-    
-    st.subheader("科目別得点入力")
-    
-    # 入力フォームを縦に配置
-    updated_scores = {}
-    
-    for subject in default_subjects:
-        # 現在の得点を取得（安全化）
-        current_score = 0
-        if not user_scores.empty:
-            subject_row = user_scores[user_scores["Subject"] == subject]
-            if not subject_row.empty and "Score" in subject_row.columns:
-                try:
-                    current_score = int(subject_row.iloc[0]["Score"])
-                except (ValueError, IndexError):
-                    current_score = 0
-        
-        score = st.number_input(
-            f"{subject}",
-            min_value=0,
-            max_value=200,
-            value=current_score,
-            step=1,
-            key=f"score_{subject}"
-        )
-        updated_scores[subject] = score
-    
-    # カスタム科目追加
-    st.subheader("カスタム科目追加")
-    custom_subject = st.text_input("科目名", key="custom_subject")
-    custom_score = st.number_input("得点", min_value=0, max_value=200, value=0, step=1, key="custom_score")
-    
-    if st.button("カスタム科目を追加", key="add_custom", use_container_width=True):
-        if custom_subject:
-            updated_scores[custom_subject] = custom_score
-            st.success(f"{custom_subject}: {custom_score}点を追加しました")
-    
-    # 保存ボタン
-    if st.button("得点を保存", key="save_scores", use_container_width=True):
-        # 既存のユーザーデータを削除（安全化）
-        if not scores_df.empty:
-            scores_df = scores_df[scores_df["Email"] != st.session_state.user_email]
-        
-        # 新しい得点データを作成
-        new_scores = []
-        for subject, score in updated_scores.items():
-            if score > 0:  # 0点より大きい場合のみ保存
-                new_scores.append({
-                    "Email": st.session_state.user_email,
-                    "Subject": subject,
-                    "Score": score
-                })
-        
-        if new_scores:
-            new_scores_df = pd.DataFrame(new_scores)
-            
-            if scores_df.empty:
-                final_df = new_scores_df
-            else:
-                final_df = pd.concat([scores_df, new_scores_df], ignore_index=True)
-            
-            if safe_save_csv(final_df, SCORES_FILE):
-                st.success("得点を保存しました！")
-            else:
-                st.error("保存に失敗しました")
-        else:
-            # 空のDataFrameでも保存（既存データの削除）
-            if safe_save_csv(scores_df, SCORES_FILE):
-                st.success("得点を更新しました！")
-
 def school_registration_page():
-    """志望校登録/更新ページ"""
+    """志望校登録/更新ページ（チェックボックス形式）"""
     st.title("🎯 志望校登録/更新")
     
     schools_df = safe_read_csv(SCHOOLS_FILE, ["Email", "SchoolName", "Subjects", "MaxScores"])
@@ -247,190 +186,410 @@ def school_registration_page():
             school_name = str(row.get("SchoolName", "Unknown"))
             subjects = str(row.get("Subjects", ""))
             max_scores = str(row.get("MaxScores", ""))
-            st.write(f"**{school_name}**")
-            st.write(f"科目: {subjects}")
-            st.write(f"最大点: {max_scores}")
-            st.write("---")
+            
+            with st.expander(f"📖 {school_name}"):
+                subjects_list = [s.strip() for s in subjects.split(",") if s.strip()]
+                max_scores_list = [s.strip() for s in max_scores.split(",") if s.strip()]
+                
+                for subj, max_score in zip(subjects_list, max_scores_list):
+                    st.write(f"• **{subj}**: {max_score}点満点")
+                
+                if st.button(f"🗑️ {school_name}を削除", key=f"delete_{idx}"):
+                    # 該当の学校を削除
+                    schools_df_filtered = schools_df[
+                        ~((schools_df["Email"] == st.session_state.user_email) & 
+                          (schools_df["SchoolName"] == school_name))
+                    ]
+                    if safe_save_csv(schools_df_filtered, SCHOOLS_FILE):
+                        st.success(f"{school_name}を削除しました")
+                        st.rerun()
     
     # 新規登録フォーム
-    st.subheader("新しい志望校を登録")
+    st.subheader("📝 新しい志望校を登録")
     
-    school_name = st.text_input("学校名", key="school_name")
+    school_name = st.text_input("🏫 学校名", key="school_name")
     
-    st.write("科目と最大点を入力してください")
-    subjects_input = st.text_area(
-        "科目（カンマ区切り）",
-        placeholder="英語,数学,国語,物理,化学",
-        key="subjects_input"
-    )
-    
-    max_scores_input = st.text_area(
-        "各科目の最大点（カンマ区切り）",
-        placeholder="150,200,200,100,100",
-        key="max_scores_input"
-    )
-    
-    # 共通テスト用のフィールド
-    st.subheader("共通テスト（オプション）")
-    kyotsu_subjects = st.text_input(
-        "共通テスト科目（カンマ区切り）",
-        placeholder="英語R,英語L,数学IA,数学IIB",
-        key="kyotsu_subjects"
-    )
-    kyotsu_max_scores = st.text_input(
-        "共通テスト最大点（カンマ区切り）",
-        placeholder="100,100,100,100",
-        key="kyotsu_max_scores"
-    )
-    
-    if st.button("志望校を保存", key="save_school", use_container_width=True):
-        if not school_name or not subjects_input or not max_scores_input:
-            st.error("学校名、科目、最大点をすべて入力してください")
-            return
+    if school_name:
+        st.write("📚 **受験科目を選択してください**")
         
-        try:
-            # 科目と最大点を結合（共通テストも含める）
-            all_subjects = subjects_input
-            all_max_scores = max_scores_input
+        # チェックボックスで科目選択
+        selected_subjects = []
+        col1, col2, col3 = st.columns(3)
+        
+        for i, subject in enumerate(ALL_SUBJECTS):
+            col = [col1, col2, col3][i % 3]
+            with col:
+                if st.checkbox(subject, key=f"subject_check_{subject}"):
+                    selected_subjects.append(subject)
+        
+        if selected_subjects:
+            st.write("📊 **各科目の満点を入力してください**")
             
-            if kyotsu_subjects and kyotsu_max_scores:
-                all_subjects += "," + kyotsu_subjects
-                all_max_scores += "," + kyotsu_max_scores
+            max_scores_dict = {}
+            for subject in selected_subjects:
+                max_score = st.number_input(
+                    f"{subject} の満点",
+                    min_value=1,
+                    max_value=1000,
+                    value=100,
+                    step=1,
+                    key=f"max_score_{subject}"
+                )
+                max_scores_dict[subject] = max_score
             
-            # データの整合性チェック
-            subjects_list = [s.strip() for s in all_subjects.split(",") if s.strip()]
-            scores_list = [s.strip() for s in all_max_scores.split(",") if s.strip()]
-            
-            if len(subjects_list) != len(scores_list):
-                st.error("科目数と最大点数が一致しません")
-                return
-            
-            # 既存のデータから同じ学校名のデータを削除（安全化）
-            if not schools_df.empty:
-                schools_df_filtered = schools_df[
-                    ~((schools_df["Email"] == st.session_state.user_email) & 
-                      (schools_df["SchoolName"] == school_name))
-                ]
-            else:
-                schools_df_filtered = pd.DataFrame(columns=["Email", "SchoolName", "Subjects", "MaxScores"])
-            
-            # 新しいデータを追加
-            new_school = pd.DataFrame({
-                "Email": [st.session_state.user_email],
-                "SchoolName": [school_name],
-                "Subjects": [all_subjects],
-                "MaxScores": [all_max_scores]
-            })
-            
-            if schools_df_filtered.empty:
-                final_df = new_school
-            else:
-                final_df = pd.concat([schools_df_filtered, new_school], ignore_index=True)
-            
-            if safe_save_csv(final_df, SCHOOLS_FILE):
-                st.success("志望校を保存しました！")
-                st.rerun()
-            else:
-                st.error("保存に失敗しました")
-                
-        except Exception as e:
-            st.error(f"データ処理エラー: {e}")
+            # 保存ボタン
+            if st.button("💾 志望校を保存", key="save_school", use_container_width=True, type="primary"):
+                try:
+                    # 既存のデータから同じ学校名のデータを削除（安全化）
+                    if not schools_df.empty:
+                        schools_df_filtered = schools_df[
+                            ~((schools_df["Email"] == st.session_state.user_email) & 
+                              (schools_df["SchoolName"] == school_name))
+                        ]
+                    else:
+                        schools_df_filtered = pd.DataFrame(columns=["Email", "SchoolName", "Subjects", "MaxScores"])
+                    
+                    # 新しいデータを準備
+                    subjects_str = ",".join(selected_subjects)
+                    max_scores_str = ",".join([str(max_scores_dict[subj]) for subj in selected_subjects])
+                    
+                    # 新しいデータを追加
+                    new_school = pd.DataFrame({
+                        "Email": [st.session_state.user_email],
+                        "SchoolName": [school_name],
+                        "Subjects": [subjects_str],
+                        "MaxScores": [max_scores_str]
+                    })
+                    
+                    if schools_df_filtered.empty:
+                        final_df = new_school
+                    else:
+                        final_df = pd.concat([schools_df_filtered, new_school], ignore_index=True)
+                    
+                    if safe_save_csv(final_df, SCHOOLS_FILE):
+                        st.success(f"🎉 {school_name}を保存しました！")
+                        st.rerun()
+                    else:
+                        st.error("保存に失敗しました")
+                        
+                except Exception as e:
+                    st.error(f"データ処理エラー: {e}")
 
-def conversion_page():
-    """志望校換算ページ"""
-    st.title("📊 志望校換算")
+def score_input_page():
+    """得点入力ページ（志望校選択→テスト名→得点入力）"""
+    st.title("📝 得点入力")
     
-    # データ読み込み（安全化）
-    scores_df = safe_read_csv(SCORES_FILE, ["Email", "Subject", "Score"])
+    # 志望校データを取得
     schools_df = safe_read_csv(SCHOOLS_FILE, ["Email", "SchoolName", "Subjects", "MaxScores"])
-    
-    user_scores = scores_df[scores_df["Email"] == st.session_state.user_email] if not scores_df.empty else pd.DataFrame()
     user_schools = schools_df[schools_df["Email"] == st.session_state.user_email] if not schools_df.empty else pd.DataFrame()
     
-    if user_scores.empty:
-        st.warning("得点が入力されていません。「得点入力」ページで得点を入力してください。")
-        return
-    
     if user_schools.empty:
-        st.warning("志望校が登録されていません。「志望校登録/更新」ページで志望校を登録してください。")
+        st.warning("⚠️ まず志望校を登録してください")
+        st.info("「志望校登録/更新」ページで志望校を登録できます")
         return
     
-    # ユーザーの得点データを辞書に変換（安全化）
-    score_dict = {}
-    for _, row in user_scores.iterrows():
-        subject = str(row.get("Subject", ""))
-        try:
-            score = float(row.get("Score", 0))
-            score_dict[subject] = score
-        except (ValueError, TypeError):
-            score_dict[subject] = 0
+    # 志望校選択
+    school_names = user_schools["SchoolName"].tolist()
+    selected_school = st.selectbox("🎯 志望校を選択", school_names, key="selected_school_for_score")
     
-    st.subheader("換算結果")
-    
-    # 各志望校について換算計算
-    for idx, school_row in user_schools.iterrows():
-        school_name = str(school_row.get("SchoolName", "Unknown"))
+    if selected_school:
+        # 選択した志望校の科目情報を取得
+        school_row = user_schools[user_schools["SchoolName"] == selected_school].iloc[0]
         subjects_str = str(school_row.get("Subjects", ""))
         max_scores_str = str(school_row.get("MaxScores", ""))
         
-        st.write(f"### {school_name}")
+        subjects_list = [s.strip() for s in subjects_str.split(",") if s.strip()]
+        max_scores_list = [float(s.strip()) for s in max_scores_str.split(",") if s.strip()]
         
-        try:
-            subjects_list = [s.strip() for s in subjects_str.split(",") if s.strip()]
-            max_scores_list = [float(s.strip()) for s in max_scores_str.split(",") if s.strip()]
+        if subjects_list:
+            # テスト名入力
+            st.subheader("📋 テスト情報")
+            test_name = st.text_input(
+                "📝 テスト名", 
+                placeholder="例：第1回模試、期末試験、過去問2023年度",
+                key="test_name"
+            )
             
-            if len(subjects_list) != len(max_scores_list):
-                st.error(f"{school_name}: 科目数と最大点数が一致しません")
-                continue
+            test_date = st.date_input("📅 実施日", key="test_date")
             
-            total_converted = 0
-            total_max = 0
-            conversion_details = []
+            if test_name:
+                st.subheader("📊 得点入力")
+                
+                # 各科目の得点入力
+                scores_dict = {}
+                
+                col1, col2 = st.columns(2)
+                for i, (subject, max_score) in enumerate(zip(subjects_list, max_scores_list)):
+                    col = col1 if i % 2 == 0 else col2
+                    with col:
+                        score = st.number_input(
+                            f"{subject} ({int(max_score)}点満点)",
+                            min_value=0.0,
+                            max_value=float(max_score),
+                            value=0.0,
+                            step=0.5,
+                            key=f"score_input_{subject}"
+                        )
+                        scores_dict[subject] = score
+                
+                # 保存ボタン
+                if st.button("💾 テスト結果を保存", key="save_test_scores", use_container_width=True, type="primary"):
+                    try:
+                        # テスト結果データを読み込み
+                        scores_df = safe_read_csv(SCORES_FILE, [
+                            "Email", "SchoolName", "TestName", "TestDate", 
+                            "Subject", "Score", "MaxScore"
+                        ])
+                        
+                        # 新しいテスト結果を追加
+                        new_scores = []
+                        for subject, score in scores_dict.items():
+                            max_score = max_scores_list[subjects_list.index(subject)]
+                            new_scores.append({
+                                "Email": st.session_state.user_email,
+                                "SchoolName": selected_school,
+                                "TestName": test_name,
+                                "TestDate": str(test_date),
+                                "Subject": subject,
+                                "Score": score,
+                                "MaxScore": max_score
+                            })
+                        
+                        new_scores_df = pd.DataFrame(new_scores)
+                        
+                        if scores_df.empty:
+                            final_df = new_scores_df
+                        else:
+                            final_df = pd.concat([scores_df, new_scores_df], ignore_index=True)
+                        
+                        if safe_save_csv(final_df, SCORES_FILE):
+                            st.success("🎉 テスト結果を保存しました！")
+                            
+                            # 簡易結果表示
+                            total_score = sum(scores_dict.values())
+                            total_max = sum(max_scores_list)
+                            percentage = (total_score / total_max * 100) if total_max > 0 else 0
+                            
+                            st.info(f"📈 **{test_name}** 総得点: {total_score:.1f}/{total_max:.1f}点 ({percentage:.1f}%)")
+                            
+                        else:
+                            st.error("保存に失敗しました")
+                            
+                    except Exception as e:
+                        st.error(f"データ処理エラー: {e}")
+
+def create_radar_chart(subjects: List[str], scores: List[float], max_scores: List[float]) -> go.Figure:
+    """レーダーチャートを作成"""
+    try:
+        # パーセンテージに変換
+        percentages = [(score / max_score * 100) if max_score > 0 else 0 
+                      for score, max_score in zip(scores, max_scores)]
+        
+        fig = go.Figure()
+        
+        fig.add_trace(go.Scatterpolar(
+            r=percentages + [percentages[0]],  # 円を閉じるため最初の値を追加
+            theta=subjects + [subjects[0]],
+            fill='toself',
+            name='得点率(%)',
+            line=dict(color='rgb(0, 123, 255)'),
+            fillcolor='rgba(0, 123, 255, 0.3)'
+        ))
+        
+        fig.update_layout(
+            polar=dict(
+                radialaxis=dict(
+                    visible=True,
+                    range=[0, 100],
+                    ticksuffix='%'
+                )
+            ),
+            showlegend=True,
+            title="科目別得点率",
+            height=500
+        )
+        
+        return fig
+        
+    except Exception as e:
+        st.error(f"レーダーチャート作成エラー: {e}")
+        return None
+
+def results_page():
+    """結果表示ページ"""
+    st.title("📊 成績結果・分析")
+    
+    # データ読み込み
+    scores_df = safe_read_csv(SCORES_FILE, [
+        "Email", "SchoolName", "TestName", "TestDate", 
+        "Subject", "Score", "MaxScore"
+    ])
+    
+    user_scores = scores_df[scores_df["Email"] == st.session_state.user_email] if not scores_df.empty else pd.DataFrame()
+    
+    if user_scores.empty:
+        st.warning("⚠️ まだテスト結果が登録されていません")
+        st.info("「得点入力」ページでテスト結果を登録してください")
+        return
+    
+    # 志望校選択
+    schools = user_scores["SchoolName"].unique().tolist()
+    selected_school = st.selectbox("🎯 志望校を選択", schools, key="result_school_select")
+    
+    if selected_school:
+        school_data = user_scores[user_scores["SchoolName"] == selected_school]
+        
+        # タブで表示内容を分ける
+        tab1, tab2, tab3 = st.tabs(["📈 成績推移", "🎯 科目別分析", "📋 テスト一覧"])
+        
+        with tab1:
+            st.subheader(f"📈 {selected_school} - 成績推移")
             
-            for subject, max_score in zip(subjects_list, max_scores_list):
-                user_score = score_dict.get(subject, 0)
+            # テスト別の総合得点推移
+            test_summary = []
+            for test_name in school_data["TestName"].unique():
+                test_data = school_data[school_data["TestName"] == test_name]
+                total_score = test_data["Score"].sum()
+                total_max = test_data["MaxScore"].sum()
+                percentage = (total_score / total_max * 100) if total_max > 0 else 0
+                test_date = test_data["TestDate"].iloc[0] if not test_data.empty else ""
                 
-                # 換算計算（ユーザーの得点が0でも計算する）
-                if max_score > 0:
-                    # 一般的な換算: (ユーザー得点 / 満点) × 志望校の最大点
-                    # ここでは満点を100点と仮定
-                    converted_score = (user_score / 100) * max_score
-                    converted_score = min(converted_score, max_score)  # 最大点を超えないように
-                else:
-                    converted_score = 0
-                
-                total_converted += converted_score
-                total_max += max_score
-                
-                conversion_details.append({
-                    "科目": subject,
-                    "あなたの得点": user_score,
-                    "最大点": max_score,
-                    "換算得点": round(converted_score, 1)
+                test_summary.append({
+                    "テスト名": test_name,
+                    "日付": test_date,
+                    "総得点": total_score,
+                    "満点": total_max,
+                    "得点率": percentage
                 })
             
-            # 結果表示
-            for detail in conversion_details:
-                st.write(f"**{detail['科目']}**: {detail['あなたの得点']}点 → {detail['換算得点']}/{detail['最大点']}点")
+            test_summary_df = pd.DataFrame(test_summary)
+            test_summary_df = test_summary_df.sort_values("日付")
             
-            # 合計とパーセンテージ
-            percentage = (total_converted / total_max * 100) if total_max > 0 else 0
-            st.write(f"**合計**: {round(total_converted, 1)}/{round(total_max, 1)}点 ({round(percentage, 1)}%)")
+            if not test_summary_df.empty:
+                # 線グラフで推移表示
+                fig = px.line(
+                    test_summary_df, 
+                    x="テスト名", 
+                    y="得点率",
+                    title="総合得点率の推移",
+                    markers=True
+                )
+                fig.update_layout(yaxis_title="得点率(%)", xaxis_title="テスト")
+                fig.update_traces(line=dict(width=3), marker=dict(size=8))
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # サマリー表示
+                st.subheader("📊 テスト結果サマリー")
+                for _, row in test_summary_df.iterrows():
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("テスト", row["テスト名"])
+                    with col2:
+                        st.metric("総得点", f"{row['総得点']:.1f}/{row['満点']:.1f}")
+                    with col3:
+                        st.metric("得点率", f"{row['得点率']:.1f}%")
+                    st.write("---")
+        
+        with tab2:
+            st.subheader(f"🎯 {selected_school} - 科目別分析")
             
-            # パフォーマンス評価
-            if percentage >= 80:
-                st.success("🎉 優秀！合格圏内です")
-            elif percentage >= 60:
-                st.info("📈 良好！もう少しで合格圏内です")
-            elif percentage >= 40:
-                st.warning("⚠️ 要努力！勉強を頑張りましょう")
-            else:
-                st.error("🔥 危険圏！大幅な得点アップが必要です")
+            # 最新テストの結果でレーダーチャート
+            if not school_data.empty:
+                latest_test = school_data["TestName"].iloc[-1]
+                latest_data = school_data[school_data["TestName"] == latest_test]
+                
+                subjects = latest_data["Subject"].tolist()
+                scores = latest_data["Score"].tolist()
+                max_scores = latest_data["MaxScore"].tolist()
+                
+                st.write(f"📝 **最新テスト: {latest_test}**")
+                
+                # レーダーチャート
+                radar_fig = create_radar_chart(subjects, scores, max_scores)
+                if radar_fig:
+                    st.plotly_chart(radar_fig, use_container_width=True)
+                
+                # 科目別詳細
+                st.subheader("📚 科目別詳細")
+                for subject in subjects:
+                    subject_data = school_data[school_data["Subject"] == subject].sort_values("TestDate")
+                    
+                    with st.expander(f"📖 {subject}"):
+                        # 科目の推移グラフ
+                        fig_subject = px.line(
+                            subject_data,
+                            x="TestName",
+                            y="Score",
+                            title=f"{subject} 得点推移",
+                            markers=True
+                        )
+                        st.plotly_chart(fig_subject, use_container_width=True)
+                        
+                        # 統計情報
+                        avg_score = subject_data["Score"].mean()
+                        max_score_achieved = subject_data["Score"].max()
+                        latest_score = subject_data["Score"].iloc[-1]
+                        
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("平均点", f"{avg_score:.1f}")
+                        with col2:
+                            st.metric("最高点", f"{max_score_achieved:.1f}")
+                        with col3:
+                            st.metric("最新", f"{latest_score:.1f}")
+        
+        with tab3:
+            st.subheader(f"📋 {selected_school} - テスト一覧")
             
-            st.write("---")
-            
-        except Exception as e:
-            st.error(f"{school_name}のデータ処理でエラーが発生しました: {e}")
+            # テスト結果一覧表
+            for test_name in school_data["TestName"].unique():
+                with st.expander(f"📝 {test_name}"):
+                    test_data = school_data[school_data["TestName"] == test_name]
+                    
+                    # テスト情報
+                    test_date = test_data["TestDate"].iloc[0]
+                    st.write(f"**実施日**: {test_date}")
+                    
+                    # 科目別得点表
+                    result_table = []
+                    total_score = 0
+                    total_max = 0
+                    
+                    for _, row in test_data.iterrows():
+                        subject = row["Subject"]
+                        score = float(row["Score"])
+                        max_score = float(row["MaxScore"])
+                        percentage = (score / max_score * 100) if max_score > 0 else 0
+                        
+                        result_table.append({
+                            "科目": subject,
+                            "得点": f"{score:.1f}",
+                            "満点": f"{max_score:.0f}",
+                            "得点率": f"{percentage:.1f}%"
+                        })
+                        
+                        total_score += score
+                        total_max += max_score
+                    
+                    # 表として表示
+                    result_df = pd.DataFrame(result_table)
+                    st.dataframe(result_df, use_container_width=True)
+                    
+                    # 総合結果
+                    total_percentage = (total_score / total_max * 100) if total_max > 0 else 0
+                    st.write(f"**総合**: {total_score:.1f}/{total_max:.0f}点 ({total_percentage:.1f}%)")
+                    
+                    # 削除ボタン
+                    if st.button(f"🗑️ {test_name}を削除", key=f"delete_test_{test_name}"):
+                        # 該当テストのデータを削除
+                        scores_df_filtered = scores_df[
+                            ~((scores_df["Email"] == st.session_state.user_email) & 
+                              (scores_df["SchoolName"] == selected_school) &
+                              (scores_df["TestName"] == test_name))
+                        ]
+                        if safe_save_csv(scores_df_filtered, SCORES_FILE):
+                            st.success(f"{test_name}を削除しました")
+                            st.rerun()
 
 def main():
     """メイン関数"""
@@ -443,20 +602,39 @@ def main():
     
     # サイドバー
     with st.sidebar:
-        st.write(f"ようこそ、{st.session_state.user_name}さん")
-        st.write(f"Email: {st.session_state.user_email}")
+        st.write(f"👤 {st.session_state.user_name}さん")
+        st.write(f"📧 {st.session_state.user_email}")
         st.write("---")
         
         # ページ選択
         page = st.selectbox(
-            "ページを選択",
-            ["得点入力", "志望校登録/更新", "志望校換算"]
+            "📱 ページを選択",
+            ["🎯 志望校登録/更新", "📝 得点入力", "📊 成績結果・分析"]
         )
         
         st.write("---")
         
+        # 統計情報表示
+        try:
+            scores_df = safe_read_csv(SCORES_FILE, ["Email", "TestName"])
+            user_scores = scores_df[scores_df["Email"] == st.session_state.user_email] if not scores_df.empty else pd.DataFrame()
+            test_count = len(user_scores["TestName"].unique()) if not user_scores.empty else 0
+            
+            schools_df = safe_read_csv(SCHOOLS_FILE, ["Email", "SchoolName"])
+            user_schools = schools_df[schools_df["Email"] == st.session_state.user_email] if not schools_df.empty else pd.DataFrame()
+            school_count = len(user_schools) if not user_schools.empty else 0
+            
+            st.write("📈 **あなたの統計**")
+            st.write(f"🎯 志望校数: {school_count}")
+            st.write(f"📝 テスト数: {test_count}")
+            
+        except Exception:
+            pass  # エラーが発生しても継続
+        
+        st.write("---")
+        
         # ログアウトボタン
-        if st.button("ログアウト", use_container_width=True):
+        if st.button("🚪 ログアウト", use_container_width=True):
             # セッション状態をクリア（安全化）
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
@@ -464,12 +642,12 @@ def main():
             st.rerun()
     
     # 選択されたページを表示
-    if page == "得点入力":
-        score_input_page()
-    elif page == "志望校登録/更新":
+    if page == "🎯 志望校登録/更新":
         school_registration_page()
-    elif page == "志望校換算":
-        conversion_page()
+    elif page == "📝 得点入力":
+        score_input_page()
+    elif page == "📊 成績結果・分析":
+        results_page()
 
 if __name__ == "__main__":
     main()
