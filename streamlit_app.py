@@ -52,7 +52,7 @@ st.markdown("""
 # データファイルのパス
 USERS_FILE = "users.csv"
 SCHOOLS_FILE = "schools.csv"
-SCORES_FILE = "test_scores.csv"  # 新しい構造：テスト結果を記録
+SCORES_FILE = "test_scores.csv"
 
 # 科目一覧
 ALL_SUBJECTS = [
@@ -226,16 +226,19 @@ def school_registration_page():
             st.write("📊 **各科目の満点を入力してください**")
             
             max_scores_dict = {}
-            for subject in selected_subjects:
-                max_score = st.number_input(
-                    f"{subject} の満点",
-                    min_value=1,
-                    max_value=1000,
-                    value=100,
-                    step=1,
-                    key=f"max_score_{subject}"
-                )
-                max_scores_dict[subject] = max_score
+            col1, col2 = st.columns(2)
+            for i, subject in enumerate(selected_subjects):
+                col = col1 if i % 2 == 0 else col2
+                with col:
+                    max_score = st.number_input(
+                        f"{subject} の満点",
+                        min_value=1,
+                        max_value=1000,
+                        value=100,
+                        step=1,
+                        key=f"max_score_{subject}"
+                    )
+                    max_scores_dict[subject] = max_score
             
             # 保存ボタン
             if st.button("💾 志望校を保存", key="save_school", use_container_width=True, type="primary"):
@@ -388,12 +391,13 @@ def create_radar_chart(subjects: List[str], scores: List[float], max_scores: Lis
         fig = go.Figure()
         
         fig.add_trace(go.Scatterpolar(
-            r=percentages + [percentages[0]],  # 円を閉じるため最初の値を追加
-            theta=subjects + [subjects[0]],
+            r=percentages,
+            theta=subjects,
             fill='toself',
             name='得点率(%)',
-            line=dict(color='rgb(0, 123, 255)'),
-            fillcolor='rgba(0, 123, 255, 0.3)'
+            line=dict(color='rgb(0, 123, 255)', width=2),
+            fillcolor='rgba(0, 123, 255, 0.3)',
+            marker=dict(size=8, color='rgb(0, 123, 255)')
         ))
         
         fig.update_layout(
@@ -401,12 +405,18 @@ def create_radar_chart(subjects: List[str], scores: List[float], max_scores: Lis
                 radialaxis=dict(
                     visible=True,
                     range=[0, 100],
-                    ticksuffix='%'
+                    ticksuffix='%',
+                    gridcolor='rgba(0,0,0,0.1)'
+                ),
+                angularaxis=dict(
+                    gridcolor='rgba(0,0,0,0.1)'
                 )
             ),
-            showlegend=True,
+            showlegend=False,
             title="科目別得点率",
-            height=500
+            title_x=0.5,
+            height=500,
+            font=dict(size=12)
         )
         
         return fig
@@ -472,22 +482,35 @@ def results_page():
                     x="テスト名", 
                     y="得点率",
                     title="総合得点率の推移",
-                    markers=True
+                    markers=True,
+                    line_shape='linear'
                 )
-                fig.update_layout(yaxis_title="得点率(%)", xaxis_title="テスト")
-                fig.update_traces(line=dict(width=3), marker=dict(size=8))
+                fig.update_layout(
+                    yaxis_title="得点率(%)", 
+                    xaxis_title="テスト",
+                    yaxis=dict(range=[0, 100]),
+                    height=400,
+                    font=dict(size=12)
+                )
+                fig.update_traces(
+                    line=dict(width=3, color='#1f77b4'), 
+                    marker=dict(size=10, color='#1f77b4')
+                )
                 st.plotly_chart(fig, use_container_width=True)
                 
                 # サマリー表示
                 st.subheader("📊 テスト結果サマリー")
                 for _, row in test_summary_df.iterrows():
-                    col1, col2, col3 = st.columns(3)
+                    col1, col2, col3, col4 = st.columns(4)
                     with col1:
                         st.metric("テスト", row["テスト名"])
                     with col2:
-                        st.metric("総得点", f"{row['総得点']:.1f}/{row['満点']:.1f}")
+                        st.metric("日付", row["日付"])
                     with col3:
-                        st.metric("得点率", f"{row['得点率']:.1f}%")
+                        st.metric("総得点", f"{row['総得点']:.1f}/{row['満点']:.1f}")
+                    with col4:
+                        color = "normal" if row['得点率'] >= 70 else "inverse"
+                        st.metric("得点率", f"{row['得点率']:.1f}%", delta_color=color)
                     st.write("---")
         
         with tab2:
@@ -495,7 +518,9 @@ def results_page():
             
             # 最新テストの結果でレーダーチャート
             if not school_data.empty:
-                latest_test = school_data["TestName"].iloc[-1]
+                # 日付でソートして最新を取得
+                school_data_sorted = school_data.sort_values("TestDate", ascending=False)
+                latest_test = school_data_sorted["TestName"].iloc[0]
                 latest_data = school_data[school_data["TestName"] == latest_test]
                 
                 subjects = latest_data["Subject"].tolist()
@@ -515,34 +540,45 @@ def results_page():
                     subject_data = school_data[school_data["Subject"] == subject].sort_values("TestDate")
                     
                     with st.expander(f"📖 {subject}"):
-                        # 科目の推移グラフ
-                        fig_subject = px.line(
-                            subject_data,
-                            x="TestName",
-                            y="Score",
-                            title=f"{subject} 得点推移",
-                            markers=True
-                        )
-                        st.plotly_chart(fig_subject, use_container_width=True)
+                        if len(subject_data) > 1:
+                            # 科目の推移グラフ
+                            fig_subject = px.line(
+                                subject_data,
+                                x="TestName",
+                                y="Score",
+                                title=f"{subject} 得点推移",
+                                markers=True
+                            )
+                            fig_subject.update_layout(
+                                height=300,
+                                yaxis_title="得点",
+                                xaxis_title="テスト"
+                            )
+                            st.plotly_chart(fig_subject, use_container_width=True)
                         
                         # 統計情報
                         avg_score = subject_data["Score"].mean()
                         max_score_achieved = subject_data["Score"].max()
+                        min_score_achieved = subject_data["Score"].min()
                         latest_score = subject_data["Score"].iloc[-1]
                         
-                        col1, col2, col3 = st.columns(3)
+                        col1, col2, col3, col4 = st.columns(4)
                         with col1:
                             st.metric("平均点", f"{avg_score:.1f}")
                         with col2:
                             st.metric("最高点", f"{max_score_achieved:.1f}")
                         with col3:
+                            st.metric("最低点", f"{min_score_achieved:.1f}")
+                        with col4:
                             st.metric("最新", f"{latest_score:.1f}")
         
         with tab3:
             st.subheader(f"📋 {selected_school} - テスト一覧")
             
-            # テスト結果一覧表
-            for test_name in school_data["TestName"].unique():
+            # テスト結果一覧表（日付順にソート）
+            test_names = school_data.sort_values("TestDate", ascending=False)["TestName"].unique()
+            
+            for test_name in test_names:
                 with st.expander(f"📝 {test_name}"):
                     test_data = school_data[school_data["TestName"] == test_name]
                     
@@ -573,11 +609,19 @@ def results_page():
                     
                     # 表として表示
                     result_df = pd.DataFrame(result_table)
-                    st.dataframe(result_df, use_container_width=True)
+                    st.dataframe(result_df, use_container_width=True, hide_index=True)
                     
                     # 総合結果
                     total_percentage = (total_score / total_max * 100) if total_max > 0 else 0
-                    st.write(f"**総合**: {total_score:.1f}/{total_max:.0f}点 ({total_percentage:.1f}%)")
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("総得点", f"{total_score:.1f}")
+                    with col2:
+                        st.metric("総満点", f"{total_max:.0f}")
+                    with col3:
+                        color = "normal" if total_percentage >= 70 else "inverse"
+                        st.metric("総合得点率", f"{total_percentage:.1f}%", delta_color=color)
                     
                     # 削除ボタン
                     if st.button(f"🗑️ {test_name}を削除", key=f"delete_test_{test_name}"):
@@ -602,7 +646,7 @@ def main():
     
     # サイドバー
     with st.sidebar:
-        st.write(f"👤 {st.session_state.user_name}さん")
+        st.write(f"👤 **{st.session_state.user_name}**さん")
         st.write(f"📧 {st.session_state.user_email}")
         st.write("---")
         
@@ -625,11 +669,28 @@ def main():
             school_count = len(user_schools) if not user_schools.empty else 0
             
             st.write("📈 **あなたの統計**")
-            st.write(f"🎯 志望校数: {school_count}")
-            st.write(f"📝 テスト数: {test_count}")
+            st.metric("🎯 志望校数", school_count)
+            st.metric("📝 テスト数", test_count)
+            
+            # 最新のテスト結果があれば表示
+            if not user_scores.empty:
+                latest_test_data = user_scores.sort_values("TestDate", ascending=False).head(1)
+                if not latest_test_data.empty:
+                    latest_test = latest_test_data.iloc[0]["TestName"]
+                    st.write(f"📋 **最新テスト**: {latest_test}")
             
         except Exception:
             pass  # エラーが発生しても継続
+        
+        st.write("---")
+        
+        # クイックアクション
+        st.write("⚡ **クイックアクション**")
+        if st.button("➕ 新しい志望校", use_container_width=True):
+            st.session_state.page = "🎯 志望校登録/更新"
+        
+        if st.button("📝 テスト結果入力", use_container_width=True):
+            st.session_state.page = "📝 得点入力"
         
         st.write("---")
         
